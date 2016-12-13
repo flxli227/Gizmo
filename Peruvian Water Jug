@@ -1,0 +1,251 @@
+//Peruvian Water Jug Code
+// Mick Geerits 2016
+ 
+///////////////////////////////
+//Stepper motor pins - Unipolar stepper
+ 
+#define IN1  7
+#define IN2  4
+#define IN3  6
+#define IN4  5
+#define RIGHT 1
+#define LEFT  0
+ 
+///////////////////////////////
+ 
+int Steps = 0;
+boolean Direction;
+//boolean oldDirection;
+ 
+unsigned long last_time;
+unsigned long currentMillis ;
+ 
+int steps_left;//was 4095 but think that is not needed.
+long time;
+//Defines the delay in microseconds between each coil activation
+int StepSpeed = 1250;
+//Defines the size of the steps taken when sound is heard
+int rightSpeed = 400;
+int leftSpeed = 400;
+int rightSpeed1 = 500;
+int leftSpeed1 = 500;
+ 
+int sSpeed;
+ 
+//Keep track of position and software stop to prevent overextending
+int pos = 0;
+int prevPos;
+//Sets maximums
+int MaxPos = 501;
+int MinPos = -501;
+ 
+///////////////////////////////
+//Sound analysis variables
+ 
+#define LIN_OUT8 1 // use the lin8 output function
+#define FFT_N 256 // set to 256 point fft
+ 
+#include <FFT.h> // include the library
+ 
+int threshold = 10;
+int freqBin = 3;
+int freqBin2 = 3;
+int freqBin3 = 10;
+int freqBin4 = 11;
+ 
+///////////////////////////////
+//SETUP
+ 
+void setup() {
+  Serial.begin(115200); // use the serial port
+  pinMode(13, OUTPUT);
+  // initialize the digital pin as an output.
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+  pinMode(IN3, OUTPUT);
+  pinMode(IN4, OUTPUT);
+  TIMSK0 = 0; // turn off timer0 for lower jitter
+  ADCSRA = 0xe5; // set the adc to free running mode
+  ADMUX = 0x40; // use adc0
+  DIDR0 = 0x01; // turn off the digital input for adc0
+}
+ 
+void loop() {
+  while (1) { // reduces jitter
+	cli();  // UDRE interrupt slows this way down on arduino1.0
+	for (int i = 0 ; i < 512 ; i += 2) { // save 256 samples
+  	while (!(ADCSRA & 0x10)); // wait for adc to be ready
+  	ADCSRA = 0xf5; // restart adc
+  	byte m = ADCL; // fetch adc data
+  	byte j = ADCH;
+  	int k = (j << 8) | m; // form into an int
+  	k -= 0x0200; // form into a signed int
+  	k <<= 6; // form into a 16b signed int
+  	fft_input[i] = k; // put real data into even bins
+  	fft_input[i + 1] = 0; // set odd bins to 0
+	}
+	fft_window(); // window the data for better frequency response
+	fft_reorder(); // reorder the data before doing the fft
+	fft_run(); // process the data in the fft
+	fft_mag_lin8() ; // take the output of the fft
+	sei();
+ 
+	// DIAGNOSTICS BLOCK //
+ 
+//       	for(byte i = 0; i < FFT_N / 2; i++)
+//   	{
+//          Serial.print(fft_lin_out8[i]);
+//          if(fft_lin_out8[i]>1)
+//      	{
+//        	int a = i;
+//            Serial.print(" ");
+//            Serial.print(a);
+//            Serial.print(" Equals: ");
+//            Serial.print(fft_lin_out8[i]);
+//      	}
+//    	}
+//      Serial.println();
+	// }
+ 
+	// END OF DIAGNOSTICS BLOCK //
+ 
+	//First freq check
+	if (fft_lin_out8[freqBin] + fft_lin_out8[freqBin2] > threshold) {
+  	//ACTUATE
+      //Serial.print("ON");
+  	digitalWrite(13, HIGH);
+  	Move(RIGHT, rightSpeed, 400);
+	}
+	else {
+  	//OPTIONAL
+      //Serial.print("OFF");
+  	digitalWrite(13, LOW);
+  	Move(LEFT, leftSpeed, 400);
+	}
+    //Serial.println();
+ 
+  //Second freq check
+  if (fft_lin_out8[freqBin3] + fft_lin_out8[freqBin4] > threshold) {
+	//ACTUATE
+    //Serial.print("ON");
+	digitalWrite(13, HIGH);
+	Move(RIGHT, rightSpeed1, 500);
+  }
+  else {
+	//OPTIONAL
+    //Serial.print("OFF");
+	digitalWrite(13, LOW);
+	Move(LEFT, leftSpeed1, 500);
+  }
+  //Serial.println();
+}
+}
+void stepper(int xw){
+  for (int x=0;x<xw;x++){
+switch(Steps){
+   case 0:
+ 	digitalWrite(IN1, LOW);
+ 	digitalWrite(IN2, LOW);
+ 	digitalWrite(IN3, LOW);
+ 	digitalWrite(IN4, HIGH);
+   break;
+   case 1:
+ 	digitalWrite(IN1, LOW);
+ 	digitalWrite(IN2, LOW);
+ 	digitalWrite(IN3, HIGH);
+ 	digitalWrite(IN4, HIGH);
+   break;
+   case 2:
+ 	digitalWrite(IN1, LOW);
+ 	digitalWrite(IN2, LOW);
+ 	digitalWrite(IN3, HIGH);
+ 	digitalWrite(IN4, LOW);
+   break;
+   case 3:
+ 	digitalWrite(IN1, LOW);
+ 	digitalWrite(IN2, HIGH);
+ 	digitalWrite(IN3, HIGH);
+ 	digitalWrite(IN4, LOW);
+   break;
+   case 4:
+ 	digitalWrite(IN1, LOW);
+ 	digitalWrite(IN2, HIGH);
+ 	digitalWrite(IN3, LOW);
+ 	digitalWrite(IN4, LOW);
+   break;
+   case 5:
+ 	digitalWrite(IN1, HIGH);
+ 	digitalWrite(IN2, HIGH);
+ 	digitalWrite(IN3, LOW);
+ 	digitalWrite(IN4, LOW);
+   break;
+ 	case 6:
+ 	digitalWrite(IN1, HIGH);
+ 	digitalWrite(IN2, LOW);
+ 	digitalWrite(IN3, LOW);
+ 	digitalWrite(IN4, LOW);
+   break;
+   case 7:
+ 	digitalWrite(IN1, HIGH);
+ 	digitalWrite(IN2, LOW);
+ 	digitalWrite(IN3, LOW);
+ 	digitalWrite(IN4, HIGH);
+   break;
+   default:
+ 	digitalWrite(IN1, LOW);
+ 	digitalWrite(IN2, LOW);
+ 	digitalWrite(IN3, LOW);
+ 	digitalWrite(IN4, LOW);
+   break;
+}
+SetDirection();
+}
+}
+  
+void SetDirection(){
+if(Direction==1){ Steps++;}
+if(Direction==0){ Steps--; }
+if(Steps>7){Steps=0;}
+if(Steps<0){Steps=7; }
+}
+ 
+void Move(int dir, int amount, int SPEED)
+{
+sSpeed = SPEED;
+prevPos = pos;
+//oldDirection = Direction;
+Direction=dir;
+steps_left=amount;
+ 
+if(Direction == LEFT){
+//if(){
+ // oldDirection == RIGHT;
+  //delay(2000);              	//Optional delay for heading back
+//}
+pos= pos - steps_left;
+}
+if(Direction == RIGHT){
+pos= pos + steps_left;
+}
+if(pos>MaxPos||pos<MinPos)
+{
+  //Serial.print("ERROR: OVEREXTENDED! :");
+  //Serial.println(pos);
+  pos=prevPos;
+  return;
+}
+ 
+ 
+while(steps_left>0)
+  {
+	currentMillis = micros();
+    if(currentMillis-last_time>=StepSpeed)
+	{
+  	stepper(1);
+      delay(sSpeed);	
+      time=time+micros()-last_time;
+      last_time=micros();
+  	steps_left--;
+	}
+  }
+}
